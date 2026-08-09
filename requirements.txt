@@ -4,5 +4,3 @@ phonenumbers
 python-whois
 dnspython
 holehe
-beautifulsoup4
-lxml
