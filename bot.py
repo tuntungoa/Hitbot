@@ -1,5 +1,4 @@
 import os
-import asyncio
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
@@ -188,7 +187,7 @@ async def leak_phone(update, context):
         else:
             await update.message.reply_text("Ошибка или лимит.")
 
-# === Главная функция ===
+# === Главная функция (синхронная) ===
 def main():
     TOKEN = os.environ.get("BOT_TOKEN")
     if not TOKEN:
