@@ -135,7 +135,7 @@ async def get_leakcheck_data(query: str, query_type: str) -> str:
         )
     return "\n".join(lines)[:4000]
 
-# ----------  Команды (без изменений)  ----------
+# ----------  Команды  ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "🔍 *ROCKET OSINT Bot*\\.\n\n"
@@ -147,7 +147,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/domain `site.com` – whois, DNS\n"
         "/leak\\_email `email` – факт утечек\n"
         "/leak\\_phone `телефон` – факт утечек\n"
-        "/leak\\_phone\\_full `телефон` – полные данные (LeakCheck)"
+        "/leak\\_phone\\_full `телефон` – полные данные \\(LeakCheck\\)"
     )
     await update.message.reply_text(text, parse_mode="MarkdownV2")
 
@@ -328,7 +328,7 @@ def main():
     app.add_handler(CommandHandler("leak_phone", leak_phone))
     app.add_handler(CommandHandler("leak_phone_full", leak_phone_full))
     print("ROCKET OSINT Bot запущен!")
-    app.run_polling(drop_pending_updates=True)  # <-- исправление здесь
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
