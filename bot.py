@@ -11,8 +11,8 @@ import dns.resolver
 import subprocess
 import re
 
-# ========== Справочники регионов ==========
-# DEF-коды России (первые 3 цифры после +7)
+# ----------  Справочники регионов  ----------
+# Россия (DEF-коды)
 DEF_REGIONS_RU = {
     "900": "Москва и МО", "901": "Москва и МО", "902": "Москва и МО",
     "903": "Москва и МО", "904": "Москва и МО", "905": "Москва и МО",
@@ -49,7 +49,7 @@ DEF_REGIONS_RU = {
     "998": "Орловская обл.", "999": "Томская обл."
 }
 
-# Коды мобильных Украины (+380) – оператор и типичный регион
+# Украина (+380)
 UA_CODES = {
     "050": ("Vodafone Украина", "Киев, центральные регионы"),
     "066": ("Vodafone Украина", "Киев, центральные регионы"),
@@ -69,7 +69,7 @@ UA_CODES = {
     "039": ("Голден Телеком", "Киев"),
 }
 
-# Health сервер
+# ----------  Health‑check для Render  ----------
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -82,7 +82,7 @@ def run_health_server():
     print(f"Health server on port {port}")
     server.serve_forever()
 
-# Асинхронные хелперы
+# ----------  Вспомогательные функции  ----------
 async def fetch_json(session, url, headers=None):
     try:
         async with session.get(url, headers=headers) as resp:
@@ -91,19 +91,22 @@ async def fetch_json(session, url, headers=None):
     except:
         return None
 
+def escape_md(text):
+    """Экранирование спецсимволов для MarkdownV2"""
+    chars = r'_[]()~`>#+-=|{}.!'
+    return ''.join(f'\\{c}' if c in chars else c for c in str(text))
+
 def get_region_info(parsed_num, raw_number):
     """Возвращает строку с регионом/оператором на основе DEF-кода."""
-    country_code = parsed_num.country_code
-    # Россия
-    if country_code == 7:
-        cleaned = re.sub(r'[^0-9]', '', raw_number)
+    cc = parsed_num.country_code
+    cleaned = re.sub(r'[^0-9]', '', raw_number)
+    # РФ
+    if cc == 7:
         if len(cleaned) >= 10 and cleaned[-10] == '9':
             def_code = cleaned[-10:-7]
             return DEF_REGIONS_RU.get(def_code, "")
     # Украина
-    if country_code == 380:
-        cleaned = re.sub(r'[^0-9]', '', raw_number)
-        # убираем 380, ищем код из 3 цифр
+    elif cc == 380:
         match = re.search(r'380(\d{3})', cleaned)
         if match:
             code = match.group(1)
@@ -113,6 +116,7 @@ def get_region_info(parsed_num, raw_number):
     return ""
 
 async def get_leakcheck_data(query: str, query_type: str) -> str:
+    """Возвращает строку с утечками из LeakCheck, если ключ задан."""
     api_key = os.environ.get("LEAKCHECK_API")
     if not api_key:
         return ""
@@ -128,19 +132,19 @@ async def get_leakcheck_data(query: str, query_type: str) -> str:
         return ""
     lines = [f"🔓 *LeakCheck: {len(entries)} записей*"]
     for entry in entries[:5]:
-        source = entry.get("source", "?")
-        password = entry.get("password", "—")
-        username = entry.get("username", "—")
-        email = entry.get("email", "—")
-        name = entry.get("name", "—")
-        address = entry.get("address", "—")
+        source = escape_md(entry.get("source", "?"))
+        password = escape_md(entry.get("password", "—"))
+        username = escape_md(entry.get("username", "—"))
+        email = escape_md(entry.get("email", "—"))
+        name = escape_md(entry.get("name", "—"))
+        address = escape_md(entry.get("address", "—"))
         lines.append(
             f"• {source}\n  ├ Логин: `{username}`\n  ├ Email: `{email}`\n"
             f"  ├ Пароль: `{password}`\n  ├ Имя: `{name}`\n  └ Адрес: `{address}`"
         )
     return "\n".join(lines)[:4000]
 
-# Команды
+# ----------  Команды бота  ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "🔍 *ROCKET OSINT Bot*\\.\n\n"
@@ -150,27 +154,33 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/phone `+380...` или `+7916...` – оператор, регион\n"
         "/passport `серия номер` – проверка РФ\n"
         "/domain `site.com` – whois, DNS\n"
-        "/leak_email `email` – факт утечек\n"
-        "/leak_phone `телефон` – факт утечек\n"
-        "/leak_phone_full `телефон` – полные данные \\(LeakCheck, нужен ключ\\)"
+        "/leak\\_email `email` – факт утечек\n"
+        "/leak\\_phone `телефон` – факт утечек\n"
+        "/leak\\_phone\\_full `телефон` – полные данные (LeakCheck)"
     )
     await update.message.reply_text(text, parse_mode="MarkdownV2")
 
-async def ip_lookup(update, context):
-    if not context.args: return
+async def ip_lookup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("/ip 8.8.8.8"); return
     ip = context.args[0]
     async with aiohttp_client.ClientSession() as s:
         data = await fetch_json(s, f"http://ip-api.com/json/{ip}?fields=status,message,country,regionName,city,isp,org,as,query")
         if data and data.get("status") == "success":
-            text = (f"IP: {data['query']}\nСтрана: {data['country']}\n"
-                    f"Регион: {data['regionName']}\nГород: {data['city']}\n"
-                    f"Провайдер: {data['isp']}\nОрг: {data['org']}\nAS: {data['as']}")
+            text = (f"IP: {escape_md(data['query'])}\n"
+                    f"Страна: {escape_md(data['country'])}\n"
+                    f"Регион: {escape_md(data['regionName'])}\n"
+                    f"Город: {escape_md(data['city'])}\n"
+                    f"Провайдер: {escape_md(data['isp'])}\n"
+                    f"Орг: {escape_md(data['org'])}\n"
+                    f"AS: {escape_md(data['as'])}")
         else:
             text = "Ошибка."
-        await update.message.reply_text(text)
+        await update.message.reply_text(text, parse_mode="MarkdownV2")
 
-async def username_search(update, context):
-    if not context.args: return
+async def username_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("/username nick"); return
     username = context.args[0]
     async with aiohttp_client.ClientSession() as s:
         data = await fetch_json(s, f"https://api.maigret-app.com/v1/search?username={username}")
@@ -179,79 +189,110 @@ async def username_search(update, context):
             if results:
                 text = f"🎯 Найдено {len(results)} профилей:\n"
                 for r in results[:20]:
-                    text += f"• {r['site']}: {r['url']}\n"
-                if len(results) > 20: text += f"… +{len(results)-20}"
-                await update.message.reply_text(text[:4000])
+                    site = escape_md(r['site'])
+                    url = r['url']
+                    text += f"• [{site}]({url})\n"
+                if len(results) > 20:
+                    text += f"… +{len(results)-20}"
+                await update.message.reply_text(text, parse_mode="MarkdownV2", disable_web_page_preview=True)
             else:
                 await update.message.reply_text("Не найдено.")
         else:
             await update.message.reply_text("Сервис Maigret недоступен.")
 
-async def email_search(update, context):
-    if not context.args: return
+async def email_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("/email user@mail.com"); return
     email = context.args[0]
     out = []
+    # Holehe
     try:
-        proc = subprocess.run(["holehe", email, "--only-used", "-C"], capture_output=True, text=True, timeout=30)
+        proc = subprocess.run(["holehe", email, "--only-used", "-C"],
+                              capture_output=True, text=True, timeout=30)
         if proc.stdout.strip():
-            out.append("📌 Регистрации:\n" + proc.stdout.strip()[:500])
-    except: pass
+            out.append("📌 Регистрации:\n" + escape_md(proc.stdout.strip()[:500]))
+    except FileNotFoundError:
+        out.append("⚠️ Holehe не установлен.")
+    except subprocess.TimeoutExpired:
+        out.append("⚠️ Holehe: долгий ответ")
+    except Exception as e:
+        out.append(f"Ошибка Holehe: {escape_md(str(e))}")
+    # BreachDirectory
     try:
         async with aiohttp_client.ClientSession() as s:
             data = await fetch_json(s, f"https://breachdirectory.org/api?func=auto&term={email}")
             if data and data.get("success"):
                 breaches = data.get("result", [])
                 if breaches:
-                    out.append(f"🛡 Утечки: {', '.join(breaches[:10])}")
-    except: pass
-    await update.message.reply_text("\n\n".join(out)[:4000] if out else "Данные не найдены.")
+                    out.append(f"🛡 Утечки: {', '.join([escape_md(b) for b in breaches[:10]])}")
+    except:
+        pass
+    text = "\n\n".join(out) if out else "Данные не найдены."
+    await update.message.reply_text(text, parse_mode="MarkdownV2", disable_web_page_preview=True)
 
-async def phone_search(update, context):
+async def phone_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("/phone +79161234567 или +380501234567")
+        await update.message.reply_text("Пример: /phone +79161234567 или +380501234567")
         return
-    num = context.args[0]
+    raw_num = context.args[0].strip()
+    # автоматически добавляем '+', если его нет
+    if not raw_num.startswith('+'):
+        raw_num = '+' + raw_num
     try:
-        p = phonenumbers.parse(num)
+        p = phonenumbers.parse(raw_num, None)  # None – автоопределение страны
         if not phonenumbers.is_valid_number(p):
             await update.message.reply_text("Некорректный номер.")
             return
         country = geocoder.description_for_number(p, "ru") or "Неизвестно"
         operator = carrier.name_for_number(p, "ru") or "Неизвестно"
         formatted = phonenumbers.format_number(p, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
-        region = get_region_info(p, num)
-        text = f"📞 *Номер:* {formatted}\n🌍 *Страна:* {country}\n📡 *Оператор:* {operator}"
+        region = get_region_info(p, raw_num)
+        # Экранируем все данные
+        text = (f"📞 *Номер:* {escape_md(formatted)}\n"
+                f"🌍 *Страна:* {escape_md(country)}\n"
+                f"📡 *Оператор:* {escape_md(operator)}")
         if region:
-            text += f"\n📍 *Регион:* {region}"
+            text += f"\n📍 *Регион:* {escape_md(region)}"
         await update.message.reply_text(text, parse_mode="MarkdownV2")
     except Exception as e:
-        await update.message.reply_text(f"Ошибка: {e}")
+        await update.message.reply_text(f"Ошибка: {escape_md(str(e))}", parse_mode="MarkdownV2")
 
-async def passport_check(update, context):
-    if len(context.args) < 2: return
+async def passport_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) < 2:
+        await update.message.reply_text("/passport 4510 123456")
+        return
     series, number = context.args[0], context.args[1]
-    if not (series.isdigit() and len(series)==4 and number.isdigit() and len(number)==6):
-        await update.message.reply_text("Формат: 4 цифры серия, 6 цифр номер."); return
+    if not (series.isdigit() and len(series) == 4 and number.isdigit() and len(number) == 6):
+        await update.message.reply_text("Формат: 4 цифры серия, 6 цифр номер.")
+        return
     await update.message.reply_text(
-        f"Проверьте паспорт {series} {number} на [сайте МВД](https://проверкапаспорта.рф)",
-        parse_mode="MarkdownV2")
+        f"Проверьте паспорт {escape_md(series)} {escape_md(number)} на [сайте МВД](https://проверкапаспорта.рф)",
+        parse_mode="MarkdownV2"
+    )
 
-async def domain_search(update, context):
-    if not context.args: return
+async def domain_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("/domain example.com")
+        return
     domain = context.args[0]
     out = []
     try:
         w = whois.whois(domain)
-        out.append(f"📅 Whois:\nРег: {w.registrar}\nСоздан: {w.creation_date}\nИстекает: {w.expiration_date}")
-    except: pass
+        out.append(f"📅 Whois:\nРег: {escape_md(str(w.registrar))}\n"
+                   f"Создан: {escape_md(str(w.creation_date))}\n"
+                   f"Истекает: {escape_md(str(w.expiration_date))}")
+    except Exception as e:
+        out.append(f"Ошибка Whois: {escape_md(str(e))}")
     try:
         answers = dns.resolver.resolve(domain, 'A')
-        out.append(f"🌐 A: {', '.join([str(r) for r in answers])}")
-    except: pass
-    await update.message.reply_text("\n\n".join(out)[:4000] if out else "Не удалось получить данные.")
+        out.append(f"🌐 A: {', '.join([escape_md(str(r)) for r in answers])}")
+    except:
+        pass
+    await update.message.reply_text("\n\n".join(out)[:4000], parse_mode="MarkdownV2")
 
-async def leak_email(update, context):
-    if not context.args: return
+async def leak_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("/leak_email user@example.com"); return
     email = context.args[0]
     url = f"https://breachdirectory.org/api?func=auto&term={email}"
     async with aiohttp_client.ClientSession() as s:
@@ -259,15 +300,17 @@ async def leak_email(update, context):
         if data and data.get("success"):
             breaches = data.get("result", [])
             if breaches:
-                text = f"🔓 Утечки для {email}:\n" + "\n".join([f"• {b}" for b in breaches[:20]])
-                await update.message.reply_text(text[:4000])
+                text = f"🔓 Утечки для {escape_md(email)}:\n" + \
+                       "\n".join([f"• {escape_md(b)}" for b in breaches[:20]])
+                await update.message.reply_text(text, parse_mode="MarkdownV2")
             else:
                 await update.message.reply_text("Утечек не найдено.")
         else:
-            await update.message.reply_text("Ошибка или лимит.")
+            await update.message.reply_text("Ошибка или лимит (5/день)")
 
-async def leak_phone(update, context):
-    if not context.args: return
+async def leak_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("/leak_phone 79161234567"); return
     phone = re.sub(r'[^0-9]', '', context.args[0])
     url = f"https://breachdirectory.org/api?func=auto&term={phone}"
     async with aiohttp_client.ClientSession() as s:
@@ -275,34 +318,40 @@ async def leak_phone(update, context):
         if data and data.get("success"):
             breaches = data.get("result", [])
             if breaches:
-                text = f"📱 Утечки для {phone}:\n" + "\n".join([f"• {b}" for b in breaches[:20]])
-                await update.message.reply_text(text[:4000])
+                text = f"📱 Утечки для {escape_md(phone)}:\n" + \
+                       "\n".join([f"• {escape_md(b)}" for b in breaches[:20]])
+                await update.message.reply_text(text, parse_mode="MarkdownV2")
             else:
                 await update.message.reply_text("Не найдено.")
         else:
-            await update.message.reply_text("Ошибка или лимит.")
+            await update.message.reply_text("Ошибка или лимит (5/день)")
 
-async def leak_phone_full(update, context):
-    if not context.args: return
+async def leak_phone_full(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("/leak_phone_full +79161234567"); return
     phone = re.sub(r'[^0-9]', '', context.args[0])
-    # Убираем проверку на РФ – теперь универсально
     text = await get_leakcheck_data(phone, "phone")
     if not text:
         if os.environ.get("LEAKCHECK_API"):
             await update.message.reply_text("Утечек не найдено или лимит (50/мес).")
         else:
             await update.message.reply_text(
-                "Нужен ключ LeakCheck API\\. Получите бесплатно на [leakcheck.io](https://leakcheck.io) и добавьте переменную `LEAKCHECK_API` в Render\\.",
+                "Нужен ключ LeakCheck API\\. Получите бесплатно на [leakcheck.io](https://leakcheck.io) "
+                "и добавьте переменную `LEAKCHECK_API` в Render\\.",
                 parse_mode="MarkdownV2"
             )
     else:
         await update.message.reply_text(text, parse_mode="MarkdownV2", disable_web_page_preview=True)
 
+# ----------  Точка входа  ----------
 def main():
     TOKEN = os.environ.get("BOT_TOKEN")
     if not TOKEN:
         print("BOT_TOKEN не задан"); exit(1)
+
+    # запускаем health‑check в фоновом потоке
     threading.Thread(target=run_health_server, daemon=True).start()
+
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ip", ip_lookup))
@@ -314,7 +363,7 @@ def main():
     app.add_handler(CommandHandler("leak_email", leak_email))
     app.add_handler(CommandHandler("leak_phone", leak_phone))
     app.add_handler(CommandHandler("leak_phone_full", leak_phone_full))
-    print("Бот с поддержкой Украины и LeakCheck запущен!")
+    print("ROCKET OSINT Bot запущен!")
     app.run_polling()
 
 if __name__ == "__main__":
