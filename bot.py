@@ -316,8 +316,7 @@ def main():
 
     threading.Thread(target=run_health_server, daemon=True).start()
 
-    # drop_pending_updates=True сбрасывает очередь старых обновлений, предотвращая конфликт
-    app = ApplicationBuilder().token(TOKEN).drop_pending_updates(True).build()
+    app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ip", ip_lookup))
     app.add_handler(CommandHandler("username", username_search))
@@ -329,7 +328,7 @@ def main():
     app.add_handler(CommandHandler("leak_phone", leak_phone))
     app.add_handler(CommandHandler("leak_phone_full", leak_phone_full))
     print("ROCKET OSINT Bot запущен!")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)  # <-- исправление здесь
 
 if __name__ == "__main__":
     main()
