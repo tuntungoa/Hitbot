@@ -1,6 +1,7 @@
 import os
 import asyncio
-from aiohttp import web
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import aiohttp as aiohttp_client
@@ -11,19 +12,18 @@ import dns.resolver
 import subprocess
 import re
 
-# --- Фейковый веб-сервер для Render (чтобы порт был занят) ---
-async def handle(request):
-    return web.Response(text="OK")
+# --- Простой HTTP-сервер в отдельном потоке (чтобы Render видел порт) ---
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
 
-async def run_web_server():
+def run_health_server():
     port = int(os.environ.get("PORT", 8000))
-    app = web.Application()
-    app.router.add_get('/', handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    print(f"Фейковый веб-сервер запущен на порту {port}")
+    server = HTTPServer(('0.0.0.0', port), HealthHandler)
+    print(f"Health server listening on port {port}")
+    server.serve_forever()
 
 # --- Вспомогательные функции ---
 async def fetch_json(session, url, headers=None):
@@ -188,16 +188,17 @@ async def leak_phone(update, context):
         else:
             await update.message.reply_text("Ошибка или лимит.")
 
-# === Главная функция, запускающая и веб-сервер, и бота ===
-async def main():
+# === Главная функция ===
+def main():
     TOKEN = os.environ.get("BOT_TOKEN")
     if not TOKEN:
-        print("BOT_TOKEN не задан"); return
+        print("BOT_TOKEN не задан"); exit(1)
 
-    # Запускаем фейковый веб-сервер (чтобы порт был открыт)
-    await run_web_server()
+    # Запускаем health-check сервер в отдельном потоке
+    health_thread = threading.Thread(target=run_health_server, daemon=True)
+    health_thread.start()
 
-    # Запускаем Telegram бота
+    # Создаём приложение бота
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ip", ip_lookup))
@@ -209,7 +210,7 @@ async def main():
     app.add_handler(CommandHandler("leak_email", leak_email))
     app.add_handler(CommandHandler("leak_phone", leak_phone))
     print("Бот запущен...")
-    await app.run_polling()
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
